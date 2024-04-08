@@ -1,6 +1,248 @@
-#footer{
-    background:transparent;
-}
-#footer-wrap{
+@import url('https://fonts.googleapis.com/css?family=Roboto:900&display=swap');
+@import url('https://fonts.googleapis.com/css?family=Roboto:400italic&display=swap');
 
+#site-title {
+    font-family: 'Roboto', sans-serif;
+    font-weight: 900; /* 超粗体 */
+    font-size: 88px; /* 或更大，根据需要调整 */
+    color: #fff; /* 可以调整为你需要的颜色 */
+    text-transform: uppercase; /* 文本大写 */
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5); /* 文本阴影，增加立体感 */
+}
+
+#site-subtitle {
+    font-family: 'Roboto', sans-serif;
+    font-style: italic; /* 斜体 */
+    font-weight: 400; /* 正常字体 */
+    font-size: 24px; /* 或更大，根据需要调整 */
+    color: #ccc; /* 浅灰色字体，根据需要调整 */
+    margin-top: 10px;
+}
+
+
+
+/* 页脚footer */
+#footer {
+    background: -webkit-linear-gradient(
+            0deg,
+            rgba(247, 149, 51, 0.1) 0,
+            rgba(243, 112, 85, 0.1) 15%,
+            rgba(239, 78, 123, 0.1) 30%,
+            rgba(161, 102, 171, 0.1) 44%,
+            rgba(80, 115, 184, 0.1) 58%,
+            rgba(16, 152, 173, 0.1) 72%,
+            rgba(7, 179, 155, 0.1) 86%,
+            rgba(109, 186, 130, 0.1) 100%
+    );
+    background: -moz-linear-gradient(
+            0deg,
+            rgba(247, 149, 51, 0.1) 0,
+            rgba(243, 112, 85, 0.1) 15%,
+            rgba(239, 78, 123, 0.1) 30%,
+            rgba(161, 102, 171, 0.1) 44%,
+            rgba(80, 115, 184, 0.1) 58%,
+            rgba(16, 152, 173, 0.1) 72%,
+            rgba(7, 179, 155, 0.1) 86%,
+            rgba(109, 186, 130, 0.1) 100%
+    );
+    background: -o-linear-gradient(
+            0deg,
+            rgba(247, 149, 51, 0.1) 0,
+            rgba(243, 112, 85, 0.1) 15%,
+            rgba(239, 78, 123, 0.1) 30%,
+            rgba(161, 102, 171, 0.1) 44%,
+            rgba(80, 115, 184, 0.1) 58%,
+            rgba(16, 152, 173, 0.1) 72%,
+            rgba(7, 179, 155, 0.1) 86%,
+            rgba(109, 186, 130, 0.1) 100%
+    );
+    background: -ms-linear-gradient(
+            0deg,
+            rgba(247, 149, 51, 0.1) 0,
+            rgba(243, 112, 85, 0.1) 15%,
+            rgba(239, 78, 123, 0.1) 30%,
+            rgba(161, 102, 171, 0.1) 44%,
+            rgba(80, 115, 184, 0.1) 58%,
+            rgba(16, 152, 173, 0.1) 72%,
+            rgba(7, 179, 155, 0.1) 86%,
+            rgba(109, 186, 130, 0.1) 100%
+    );
+    background: linear-gradient(
+            90deg,
+            rgba(247, 149, 51, 0.1) 0,
+            rgba(243, 112, 85, 0.1) 15%,
+            rgba(239, 78, 123, 0.1) 30%,
+            rgba(161, 102, 171, 0.1) 44%,
+            rgba(80, 115, 184, 0.1) 58%,
+            rgba(16, 152, 173, 0.1) 72%,
+            rgba(7, 179, 155, 0.1) 86%,
+            rgba(109, 186, 130, 0.1) 100%
+    );
+}
+#footer:before {
+    background-color: rgba(0, 0, 0, 0);
+}
+
+.upy {
+    vertical-align:middle;
+    display: inline;
+}
+
+.footer-a {
+    border-bottom:none;
+    color:#4c4948
+}
+
+.footer-a:hover{
+    color:#4c4948
+}
+
+#footer-wrap, #footer-wrap a{
+    color: #4c4948 !important;
+}
+
+.framework-info {
+    display: none;
+}
+
+
+#footer-wrap {
+    color: #0d0d0d;
+    padding: 20px;
+    font-size: 0.8em;
+    text-align: center;
+
+}
+#nav a {
+    padding: 10px;
+    border-bottom: 2px solid transparent;
+}
+
+#nav a:hover {
+    border-bottom-color: currentColor;
+}
+
+.recent-post-item .recent-post-info {
+    background-image: linear-gradient(to top, #accbee 0%, #e7f0fd 100%);
+}
+
+
+.recent-post-info {
+    display: flex; /* Use flexbox to align children */
+    flex-direction: column; /* Stack children vertically */
+    justify-content: center; /* Center children vertically */
+    height: 235.2px; /* Your desired height */
+    text-align: center; /* Center text horizontally, if you want */
+    padding: 0 10px; /* Add some padding if needed */
+    font-family: "Comic Sans MS", cursive, sans-serif; /* A commonly available whimsical font */
+    font-size: 1.2em; /* Increase font-size if needed */
+    font-weight: bold; /* Make it bold */
+    font-style: italic; /* A touch of italic can add to the whimsy */
+    text-transform: capitalize; /* Capitalize each word for emphasis */
+    /* Other styles to center content as discussed previously */
+}
+
+#aside-content {
+    background-image: linear-gradient(to top, #f3e7e9 0%, #e3eeff 99%, #e3eeff 100%);
+}
+
+#recent-posts {
+    background-color: transparent;
+}
+
+.recent-post-info {
+    height: 235px; /* Sets the height of the element to 235.2 pixels */
+}
+
+
+
+
+
+#aside-content {
+    background-color: transparent;
+}
+
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background-color: rgba(73, 177, 245, 0.2);
+    border-radius: 2em;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: #49b1f5;
+    background-image: -webkit-linear-gradient(
+            45deg,
+            rgba(255, 255, 255, 0.4) 25%,
+            transparent 25%,
+            transparent 50%,
+            rgba(255, 255, 255, 0.4) 50%,
+            rgba(255, 255, 255, 0.4) 75%,
+            transparent 75%,
+            transparent
+    );
+    border-radius: 2em;
+}
+
+::-webkit-scrollbar-corner {
+    background-color: transparent;
+}
+
+::-moz-selection {
+    color: #fff;
+    background-color: #49b1f5;
+}
+
+
+/* 鼠标样式 */
+body {
+    cursor: url(https://cdn.jsdelivr.net/gh/constown/HexoCustomFile/public/cursors/default.cur),
+    default;
+}
+a,
+img {
+    cursor: url(https://cdn.jsdelivr.net/gh/constown/HexoCustomFile/public/cursors/pointer.cur),
+    default;
+}
+
+
+/* 文章页背景 */
+.layout_post>#post {
+    /* 以下代表白色透明度为0.3 */
+    background: rgba(255,255,255,.3);
+}
+/* 所有背景（包括首页卡片、文章页、页面页等） */
+#aside_content .card-widget, #recent-posts>.recent-post-item, .layout_page>div:first-child:not(.recent-posts), .layout_post>#page, .layout_post>#post, .read-mode .layout_post>#post{
+    /* 以下代表白色透明度为0.3 */
+    background: rgba(255,255,255,.3);
+}
+
+.is-center {
+    background-image: linear-gradient(to top, #d299c2 0%, #fef9d7 100%);
+}
+
+.item-headline {
+    background-image: linear-gradient(to top, #d299c2 0%, #fef9d7 100%);
+}
+
+
+.announcement_content {
+    background-image: linear-gradient(120deg, #89f7fe 0%, #66a6ff 100%);
+}
+
+.aside-list {
+    background-image: linear-gradient(to top, #fff1eb 0%, #ace0f9 100%);
+}
+
+.card-archive-list-item{
+    background-image: linear-gradient(to top, #accbee 0%, #e7f0fd 100%);
+}
+
+.webinfo {
+    background-image: linear-gradient(to top, #e6e9f0 0%, #eef1f5 100%);
 }
