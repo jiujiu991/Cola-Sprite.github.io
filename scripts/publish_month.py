@@ -114,8 +114,6 @@ def is_valid_template(path: Path) -> bool:
         return False
     if "<title>" not in text or "</title>" not in text:
         return False
-    if "\\1" in text or "\\2" in text or "\\3" in text:
-        return False
     return True
 
 
@@ -190,6 +188,20 @@ def encode_image_base64(image_path: Path) -> str:
 def analyze_images(image_paths: List[Path], openclaw_path: str) -> str:
     """Use vision model to analyze images and return descriptions."""
     if not image_paths or not Path(openclaw_path).exists():
+        return ""
+
+    # Check if openclaw agent supports --image
+    try:
+        help_out = subprocess.run(
+            [openclaw_path, "agent", "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if "--image" not in (help_out.stdout or ""):
+            return ""
+    except Exception:
         return ""
     
     # Only analyze first 4 images to keep prompt size reasonable
@@ -288,7 +300,65 @@ def safe_id(s: str) -> str:
     return s.strip()
 
 
-def build_article_html(content: Dict, img_rel_paths: List[str]) -> str:
+def build_image_captions(images: List[Path]) -> Dict[str, str]:
+    keyword_map = {
+        "coffee": "咖啡香气",
+        "morning": "清晨的光",
+        "sunset": "日落晚霞",
+        "park": "公园散步",
+        "book": "安静阅读",
+        "cozy": "温暖角落",
+        "cover": "本月封面",
+        "food": "家常味道",
+        "dinner": "晚餐时刻",
+        "breakfast": "早餐时间",
+        "lunch": "午间片刻",
+        "night": "夜色",
+        "street": "街角",
+        "sky": "天空",
+        "rain": "雨后",
+        "snow": "冬日",
+        "flower": "花开",
+        "sea": "海风",
+        "mountain": "远山",
+    }
+    captions: Dict[str, str] = {}
+    for img in images:
+        stem = img.stem.lower()
+        tokens = re.split(r"[^a-z0-9]+", stem)
+        picked = []
+        for t in tokens:
+            if t in keyword_map and keyword_map[t] not in picked:
+                picked.append(keyword_map[t])
+            if len(picked) >= 2:
+                break
+        if not picked:
+            captions[img.name] = "这一刻"
+        else:
+            captions[img.name] = " · ".join(picked)
+    return captions
+
+
+def build_photo_wall(img_rel_paths: List[str], captions: Dict[str, str]) -> str:
+    if not img_rel_paths:
+        return ""
+    cols = 3
+    rows = [img_rel_paths[i : i + cols] for i in range(0, len(img_rel_paths), cols)]
+    html_rows = []
+    for row in rows:
+        cells = []
+        for src in row:
+            name = Path(src).name
+            cap = captions.get(name, "")
+            cap_html = f"<figcaption>{cap}</figcaption>" if cap else ""
+            cells.append(f'<td><figure><img src="{src}" alt="{cap}" style="zoom:45%;" />{cap_html}</figure></td>')
+        while len(cells) < cols:
+            cells.append("<td></td>")
+        html_rows.append("<tr>" + "".join(cells) + "</tr>")
+    return "<table><thead><tr><th>回忆墙</th><th></th><th></th></tr></thead><tbody>" + "".join(html_rows) + "</tbody></table>"
+
+
+def build_article_html(content: Dict, img_rel_paths: List[str], captions: Dict[str, str]) -> str:
     # Ensure we have at least 4 images to place
     imgs = (img_rel_paths + img_rel_paths[:6])[:6]
     img_a, img_b, img_c, img_d, img_e, img_f = (imgs + imgs[:6])[:6]
@@ -329,6 +399,8 @@ def build_article_html(content: Dict, img_rel_paths: List[str]) -> str:
     s2_text = safe_text(s2.get("text", ""))
     s3_text = safe_text(s3.get("text", ""))
 
+    wall_html = build_photo_wall(img_rel_paths, captions)
+
     return (
         f'<article class="post-content" id="article-container">'
         f'<h1 id="{h1_id}"><a href="#{h1_id}" class="headerlink" title="{h1}"></a>{h1}</h1>'
@@ -346,14 +418,12 @@ def build_article_html(content: Dict, img_rel_paths: List[str]) -> str:
         f'<td><img src="{img_d}" alt="那一刻" style="zoom:55%;" /></td></tr></tbody></table>'
         f'<h3 id="🚶-傍晚散步"><a href="#🚶-傍晚散步" class="headerlink" title="🚶 傍晚散步"></a>{s3_title}</h3>'
         f"<p>{s3_text}</p>"
-        f'<figure><img src="{img_e}" alt="傍晚散步" style="zoom:70%;" /><figcaption>傍晚的风，刚刚好。</figcaption></figure>'
+        f'<figure><img src="{img_e}" alt="傍晚散步" style="zoom:70%;" />'
+        f'<figcaption>{captions.get(Path(img_e).name, "傍晚的风，刚刚好。")}</figcaption></figure>'
         f'<h3 id="📝-小小计划"><a href="#📝-小小计划" class="headerlink" title="📝 小小计划"></a>{s4_title}</h3>'
         f"<ul>{bullets_html}</ul>"
         '<h3 id="📸-回忆拼图"><a href="#📸-回忆拼图" class="headerlink" title="📸 回忆拼图"></a>📸 回忆拼图</h3>'
-        '<table><thead><tr><th>一瞬</th><th>一景</th><th>一笑</th></tr></thead>'
-        f'<tbody><tr><td><img src="{img_b}" alt="一瞬" style="zoom:45%;" /></td>'
-        f'<td><img src="{img_f}" alt="一景" style="zoom:45%;" /></td>'
-        f'<td><img src="{img_a}" alt="一笑" style="zoom:45%;" /></td></tr></tbody></table>'
+        f'{wall_html}'
         f'<hr><h2 id="🌟-结语"><a href="#🌟-结语" class="headerlink" title="🌟 结语"></a>🌟 结语</h2>'
         f"<p>{closing}</p>"
         f"<blockquote><p>愿我们在新的一个月里，仍被温柔和热爱拥抱。#月度日记 #日常记录</p></blockquote>"
@@ -382,6 +452,42 @@ def update_counts_and_dates(html_text: str, total_posts: int, update_time: str, 
         lambda m: f"{m.group(1)}{update_time}{m.group(3)}",
         html_text,
     )
+    return html_text
+
+
+def repair_html_blocks(html_text: str, total_posts: int, last_push_iso: str) -> str:
+    # Fix corrupted archives count link in sidebar site-data
+    def fix_sidebar_archives(m: re.Match) -> str:
+        inner = m.group(2)
+        if 'class="headline">文章</div>' in inner:
+            return m.group(0)
+        correct_inner = f'<div class="headline">文章</div><div class="length-num">{total_posts}</div>'
+        return f'{m.group(1)}{correct_inner}{m.group(3)}'
+
+    html_text = re.sub(
+        r'(sidebar-site-data site-data is-center"><a href="/Cola-Sprite.github.io/archives/">)(.*?)(</a>)',
+        fix_sidebar_archives,
+        html_text,
+        flags=re.DOTALL,
+    )
+
+    # Fix corrupted webinfo count block like <div class="webinfo-item">\15\3</div>
+    html_text = re.sub(
+        r'<div class="webinfo-item">\\[^<]*</div>',
+        f'<div class="webinfo-item"><div class="item-name">文章数目 :</div><div class="item-count">{total_posts}</div></div>',
+        html_text,
+    )
+
+    # Fix last-push-date attribute corruption
+    html_text = re.sub(
+        r'<div class="item-count" id="last-push-date"[^>]*>',
+        f'<div class="item-count" id="last-push-date" data-lastPushDate="{last_push_iso}">',
+        html_text,
+    )
+
+    # Remove stray backref artifacts if any
+    html_text = html_text.replace("\\g<1>", "").replace("\\1", "").replace("\\2", "").replace("\\3", "")
+
     return html_text
 
 
@@ -657,6 +763,7 @@ def main() -> int:
         content = fallback_content(year, month_cn)
 
     # Build article
+    captions = build_image_captions(images)
     img_rel_paths = [
         f"{SITE_ROOT}img/{year}-{month_str}/{p.name}"
         for p in images
@@ -665,7 +772,7 @@ def main() -> int:
     if not img_rel_paths:
         img_rel_paths = [f"{SITE_ROOT}img/{year}-{month_str}/{cover.name}"]
 
-    article_html = build_article_html(content, img_rel_paths)
+    article_html = build_article_html(content, img_rel_paths, captions)
 
     # New post path
     slug = f"{year}{month_str}"
@@ -776,7 +883,11 @@ def main() -> int:
             publish_date=publish_date_str,
         )
         month_text = update_archives_index(month_text, year, month_item)
-        month_text = re.sub(r'(文章总览 - )\d+', r"\\g<1>1", month_text)
+        month_text = re.sub(
+            r'(文章总览 - )\d+',
+            lambda m: f"{m.group(1)}1",
+            month_text,
+        )
         month_archive_path.write_text(month_text, encoding="utf-8")
     else:
         # Use any existing archive month as template
@@ -808,7 +919,11 @@ def main() -> int:
         )
         month_block = f'<div class="article-sort"><div class="article-sort-item year">{year}</div>{month_item}</div>'
         month_text = re.sub(r'<div class="article-sort">.*?</nav>', month_block + '<nav', month_text, flags=re.DOTALL)
-        month_text = re.sub(r'(文章总览 - )\d+', r"\\g<1>1", month_text)
+        month_text = re.sub(
+            r'(文章总览 - )\d+',
+            lambda m: f"{m.group(1)}1",
+            month_text,
+        )
         if not args.dry_run:
             month_archive_path.parent.mkdir(parents=True, exist_ok=True)
             month_archive_path.write_text(month_text, encoding="utf-8")
@@ -829,6 +944,7 @@ def main() -> int:
     # Update counts + timestamps across all html pages
     for p in REPO_ROOT.rglob("*.html"):
         html = p.read_text(encoding="utf-8")
+        html = repair_html_blocks(html, total_posts, last_push_iso)
         html = update_counts_and_dates(html, total_posts, update_time, last_push_iso)
         # Ensure archive list has the current month
         html = update_archive_list(
@@ -837,9 +953,14 @@ def main() -> int:
             month_label=f"{month_cn} {year}",
             count=1,
         )
-        # Update archives index total
-        if p.name == "index.html" and p.parent.name == "archives":
-            html = re.sub(r'(文章总览 - )\d+', rf"\\g<1>{total_posts}", html)
+        # Update per-page archive count if present
+        if "文章总览 -" in html:
+            page_count = html.count('class="article-sort-item-img"')
+            html = re.sub(
+                r'(文章总览 - )\d+',
+                lambda m: f"{m.group(1)}{page_count}",
+                html,
+            )
         p.write_text(html, encoding="utf-8")
 
     print(f"OK: Generated {post_path}")
