@@ -1164,7 +1164,14 @@ def main() -> int:
     print(f"Cover: {cover_rel}")
     if args.push and not args.dry_run:
         commit_msg = args.commit_message or f"Add {title}"
-        subprocess.run(["git", "add", "-A"], cwd=str(REPO_ROOT), check=False)
+        git_add_paths = [
+            str(post_path.relative_to(REPO_ROOT)),
+            str(index_path.relative_to(REPO_ROOT)),
+            str(archives_index.relative_to(REPO_ROOT)),
+            str(month_archive_path.relative_to(REPO_ROOT)),
+            f"img/{year}-{month_str}",
+        ]
+        subprocess.run(["git", "add", "--"] + git_add_paths, cwd=str(REPO_ROOT), check=False)
         subprocess.run(["git", "commit", "-m", commit_msg], cwd=str(REPO_ROOT), check=False)
         subprocess.run(["git", "push"], cwd=str(REPO_ROOT), check=False)
         print("Git push: done.")
