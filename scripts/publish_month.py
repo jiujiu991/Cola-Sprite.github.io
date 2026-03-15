@@ -89,13 +89,58 @@ def list_images(src_dir: Path) -> List[Path]:
     return sorted(images)
 
 
+def image_size_sips(path: Path) -> Optional[Tuple[int, int]]:
+    sips = shutil.which("sips")
+    if not sips:
+        return None
+    try:
+        result = subprocess.run(
+            [sips, "-g", "pixelWidth", "-g", "pixelHeight", str(path)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return None
+    width = height = None
+    for line in (result.stdout or "").splitlines():
+        if "pixelWidth" in line:
+            width = int(line.strip().split()[-1])
+        if "pixelHeight" in line:
+            height = int(line.strip().split()[-1])
+    if width and height:
+        return width, height
+    return None
+
+
+def cover_score(path: Path) -> float:
+    name = path.stem.lower()
+    score = 0.0
+    if name.startswith("cover"):
+        score += 1000.0
+    if any(k in name for k in ["sky", "sunset", "sea", "mountain", "city", "street", "park"]):
+        score += 50.0
+    size = image_size_sips(path)
+    if size:
+        w, h = size
+        ratio = w / h if h else 1.0
+        # Favor landscape ratio
+        if 1.2 <= ratio <= 2.4:
+            score += 200.0
+        score += (w * h) / 1_000_000.0
+    else:
+        # Fallback to file size
+        score += path.stat().st_size / 1_000_000.0
+    # Recent files slight bonus
+    score += path.stat().st_mtime / 1_000_000_000.0
+    return score
+
+
 def pick_cover(images: List[Path]) -> Optional[Path]:
     if not images:
         return None
-    cover = [p for p in images if p.stem.lower().startswith("cover")]
-    if cover:
-        return sorted(cover)[0]
-    return max(images, key=lambda p: p.stat().st_mtime)
+    return max(images, key=cover_score)
 
 
 def ensure_copy_images(images: List[Path], dst_dir: Path, dry_run: bool) -> None:
@@ -260,6 +305,14 @@ def fallback_content(year: int, month_cn: str) -> Dict:
                 "把每个月的日常继续记录下来。",
             ],
         },
+        "section5": {
+            "title": "✨ 小确幸清单",
+            "text": "一杯热饮、一段散步、一张照片，都是这个月的小确幸。",
+        },
+        "section6": {
+            "title": "🧺 生活碎片",
+            "text": "把零碎的快乐收好，等忙碌的时候翻出来看看。",
+        },
         "closing": "愿我们在新的一个月里，依旧被温柔和热爱包围。",
     }
 
@@ -285,6 +338,8 @@ def build_prompt(year: int, month_cn: str, title: str, image_names: List[str], i
         '  "section2": {"title": "🍲 厨房的小欢喜", "text": "..."},\n'
         '  "section3": {"title": "🚶 傍晚散步", "text": "..."},\n'
         '  "section4": {"title": "📝 小小计划", "bullets": ["...", "...", "..."]},\n'
+        '  "section5": {"title": "✨ 小确幸清单", "text": "..."},\n'
+        '  "section6": {"title": "🧺 生活碎片", "text": "..."},\n'
         '  "closing": "结语 1-2 句"\n'
         "}\n"
         "要求：语言自然、温柔，不要提到AI或提示词。文案必须与图片内容和氛围匹配。"
@@ -388,6 +443,8 @@ def build_article_html(content: Dict, img_rel_paths: List[str], captions: Dict[s
     s2 = content.get("section2", {})
     s3 = content.get("section3", {})
     s4 = content.get("section4", {})
+    s5 = content.get("section5", {})
+    s6 = content.get("section6", {})
     closing = safe_text(content.get("closing", ""))
     intro = safe_text(content.get("intro", ""))
 
@@ -398,6 +455,10 @@ def build_article_html(content: Dict, img_rel_paths: List[str], captions: Dict[s
     s1_text = safe_text(s1.get("text", ""))
     s2_text = safe_text(s2.get("text", ""))
     s3_text = safe_text(s3.get("text", ""))
+    s5_title = safe_text(s5.get("title", "✨ 小确幸清单"))
+    s5_text = safe_text(s5.get("text", ""))
+    s6_title = safe_text(s6.get("title", "🧺 生活碎片"))
+    s6_text = safe_text(s6.get("text", ""))
 
     wall_html = build_photo_wall(img_rel_paths, captions)
 
@@ -407,21 +468,36 @@ def build_article_html(content: Dict, img_rel_paths: List[str], captions: Dict[s
         f"{quote_html}"
         f"<blockquote><p>{intro}</p></blockquote>"
         f'<h2 id="🌿-春天的信号"><a href="#🌿-春天的信号" class="headerlink" title="🌿 春天的信号"></a>{s1_title}</h2>'
-        f"<p>{s1_text}</p>"
-        '<table><thead><tr><th>日常一角</th><th>当日心情</th></tr></thead>'
-        f'<tbody><tr><td><img src="{img_a}" alt="日常一角" style="zoom:40%;" /></td>'
-        f'<td><img src="{img_b}" alt="当日心情" style="zoom:40%;" /></td></tr></tbody></table>'
+        f'<div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">'
+        f'<div style="flex:1;min-width:240px;"><p>{s1_text}</p></div>'
+        f'<div style="flex:1;min-width:240px;"><figure><img src="{img_a}" alt="日常一角" style="width:100%;border-radius:8px;" />'
+        f'<figcaption>{captions.get(Path(img_a).name, "日常一角")}</figcaption></figure></div>'
+        f'</div>'
+        f'<div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;margin-top:10px;">'
+        f'<div style="flex:1;min-width:240px;"><figure><img src="{img_b}" alt="当日心情" style="width:100%;border-radius:8px;" />'
+        f'<figcaption>{captions.get(Path(img_b).name, "当日心情")}</figcaption></figure></div>'
+        f'<div style="flex:1;min-width:240px;"><blockquote><p>这个月的每一次好心情，都是来自你的小小温柔。</p></blockquote></div>'
+        f'</div>'
         f'<h3 id="🍲-厨房的小欢喜"><a href="#🍲-厨房的小欢喜" class="headerlink" title="🍲 厨房的小欢喜"></a>{s2_title}</h3>'
-        f"<p>{s2_text}</p>"
-        '<table><thead><tr><th>这一餐</th><th>那一刻</th></tr></thead>'
-        f'<tbody><tr><td><img src="{img_c}" alt="这一餐" style="zoom:55%;" /></td>'
-        f'<td><img src="{img_d}" alt="那一刻" style="zoom:55%;" /></td></tr></tbody></table>'
+        f'<div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">'
+        f'<div style="flex:1;min-width:240px;"><figure><img src="{img_c}" alt="这一餐" style="width:100%;border-radius:8px;" />'
+        f'<figcaption>{captions.get(Path(img_c).name, "这一餐")}</figcaption></figure></div>'
+        f'<div style="flex:1;min-width:240px;"><p>{s2_text}</p>'
+        f'<figure><img src="{img_d}" alt="那一刻" style="width:100%;border-radius:8px;margin-top:8px;" />'
+        f'<figcaption>{captions.get(Path(img_d).name, "那一刻")}</figcaption></figure></div>'
+        f'</div>'
         f'<h3 id="🚶-傍晚散步"><a href="#🚶-傍晚散步" class="headerlink" title="🚶 傍晚散步"></a>{s3_title}</h3>'
-        f"<p>{s3_text}</p>"
-        f'<figure><img src="{img_e}" alt="傍晚散步" style="zoom:70%;" />'
-        f'<figcaption>{captions.get(Path(img_e).name, "傍晚的风，刚刚好。")}</figcaption></figure>'
+        f'<div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">'
+        f'<div style="flex:1;min-width:240px;"><p>{s3_text}</p></div>'
+        f'<div style="flex:1;min-width:240px;"><figure><img src="{img_e}" alt="傍晚散步" style="width:100%;border-radius:8px;" />'
+        f'<figcaption>{captions.get(Path(img_e).name, "傍晚的风，刚刚好。")}</figcaption></figure></div>'
+        f'</div>'
         f'<h3 id="📝-小小计划"><a href="#📝-小小计划" class="headerlink" title="📝 小小计划"></a>{s4_title}</h3>'
         f"<ul>{bullets_html}</ul>"
+        f'<h3 id="✨-小确幸清单"><a href="#✨-小确幸清单" class="headerlink" title="✨ 小确幸清单"></a>{s5_title}</h3>'
+        f"<p>{s5_text}</p>"
+        f'<h3 id="🧺-生活碎片"><a href="#🧺-生活碎片" class="headerlink" title="🧺 生活碎片"></a>{s6_title}</h3>'
+        f"<p>{s6_text}</p>"
         '<h3 id="📸-回忆拼图"><a href="#📸-回忆拼图" class="headerlink" title="📸 回忆拼图"></a>📸 回忆拼图</h3>'
         f'{wall_html}'
         f'<hr><h2 id="🌟-结语"><a href="#🌟-结语" class="headerlink" title="🌟 结语"></a>🌟 结语</h2>'
