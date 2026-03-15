@@ -252,30 +252,27 @@ def fallback_content(year: int, month_cn: str) -> Dict:
     }
 
 
-def build_prompt(year: int, month_cn: str, title: str, image_names: List[str], image_descriptions: str = "") -> str:
+def build_prompt(year: int, month_cn: str, title: str, image_names: List[str]) -> str:
     image_list = "\n".join(f"- {name}" for name in image_names[:8])
-    desc_section = f"\n{image_descriptions}\n" if image_descriptions else ""
     return (
         "你是写作爱人日常的中文博客作者。请写一篇温暖、细腻、生活化的月度记录。\n"
         f"标题主题：{title}\n"
         f"月份：{year}年{month_cn}\n"
-        "可参考的图片（图片内容和风格描述）：\n"
+        "可参考的图片文件名（仅用于灵感，不要逐一描述）：\n"
         f"{image_list}\n"
-        f"{desc_section}"
-        "请根据上述图片的真实内容来写，确保文案与图片氛围匹配。\n"
         "\n"
         "请严格输出 JSON，不要包含其它文字。JSON 格式如下：\n"
         "{\n"
-        '  "h1": "三月：xxxx～",\n'
-        '  "quote": "一句话 —— 作者",\n'
-        '  "intro": "2-3 句话的引入",\n'
-        '  "section1": {"title": "🌿 春天的信号", "text": "..."},\n'
-        '  "section2": {"title": "🍲 厨房的小欢喜", "text": "..."},\n'
-        '  "section3": {"title": "🚶 傍晚散步", "text": "..."},\n'
-        '  "section4": {"title": "📝 小小计划", "bullets": ["...", "...", "..."]},\n'
-        '  "closing": "结语 1-2 句"\n'
+        '  \"h1\": \"三月：xxxx～\",\n'
+        '  \"quote\": \"一句话 —— 作者\",\n'
+        '  \"intro\": \"2-3 句话的引入\",\n'
+        '  \"section1\": {\"title\": \"🌿 春天的信号\", \"text\": \"...\"},\n'
+        '  \"section2\": {\"title\": \"🍲 厨房的小欢喜\", \"text\": \"...\"},\n'
+        '  \"section3\": {\"title\": \"🚶 傍晚散步\", \"text\": \"...\"},\n'
+        '  \"section4\": {\"title\": \"📝 小小计划\", \"bullets\": [\"...\", \"...\", \"...\"]},\n'
+        '  \"closing\": \"结语 1-2 句\"\n'
         "}\n"
-        "要求：语言自然、温柔，不要提到AI或提示词。文案必须与图片内容和氛围匹配。"
+        "要求：语言自然、温柔，不要提到AI或提示词。"
     )
 
 
@@ -643,15 +640,7 @@ def main() -> int:
     title = f"{year}年{month_str} Daily！"
     desc_default = f"{month_cn}：日常与小确幸～"
 
-    # Analyze images first to get descriptions
-    image_descriptions = ""
-    if not args.no_openclaw:
-        print("Analyzing images with vision model...")
-        image_descriptions = analyze_images(images, args.openclaw_path)
-        if image_descriptions:
-            print(f"Got image descriptions for {len(images[:4])} images")
-    
-    prompt = build_prompt(year, month_cn, title, [p.name for p in images], image_descriptions)
+    prompt = build_prompt(year, month_cn, title, [p.name for p in images])
     content = None if args.no_openclaw else openclaw_generate(prompt, args.openclaw_path)
     if not content:
         content = fallback_content(year, month_cn)
@@ -672,11 +661,8 @@ def main() -> int:
     post_dir = REPO_ROOT / str(year) / month_str / f"{publish_date.day:02d}" / slug
     post_path = post_dir / "index.html"
     if post_path.exists():
-        if not args.overwrite:
-            print(f"ERROR: Post already exists: {post_path}")
-            return 1
-        else:
-            print(f"Overwriting existing post: {post_path}")
+        print(f"ERROR: Post already exists: {post_path}")
+        return 1
 
     template_path = find_latest_post()
     template_text = template_path.read_text(encoding="utf-8")
