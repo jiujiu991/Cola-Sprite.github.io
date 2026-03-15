@@ -748,6 +748,10 @@ def update_archives_index(
     year: int,
     new_item: str,
 ) -> str:
+    if 'href="' in new_item:
+        link = extract_first(r'href="([^"]+)"', new_item)
+        if link and link in html_text:
+            return html_text
     year_marker = f'<div class="article-sort-item year">{year}</div>'
     if year_marker in html_text:
         return html_text.replace(year_marker, year_marker + new_item, 1)
@@ -921,7 +925,7 @@ def main() -> int:
             excerpt=content.get("h1", desc_default),
         )
         anchor = '<div class="recent-posts" id="recent-posts">'
-        if anchor in index_text:
+        if anchor in index_text and post_link not in index_text:
             index_text = index_text.replace(anchor, anchor + new_item, 1)
         index_path.write_text(index_text, encoding="utf-8")
 
