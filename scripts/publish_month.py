@@ -729,6 +729,32 @@ def build_recent_post_item(
     )
 
 
+def rebuild_recent_posts(html_text: str) -> str:
+    anchor = '<div class="recent-posts" id="recent-posts">'
+    anchor_idx = html_text.find(anchor)
+    if anchor_idx == -1:
+        return html_text
+    nav_idx = html_text.find('<nav id="pagination"', anchor_idx)
+    if nav_idx == -1:
+        return html_text
+
+    items = re.findall(r'<div class="recent-post-item">.*?</div></div>', html_text, flags=re.DOTALL)
+    if not items:
+        return html_text
+
+    seen_links = set()
+    cleaned = []
+    for item in items:
+        link = extract_first(r'href="([^"]+)"', item)
+        if link and link in seen_links:
+            continue
+        if link:
+            seen_links.add(link)
+        cleaned.append(item)
+
+    return html_text[: anchor_idx + len(anchor)] + "".join(cleaned) + html_text[nav_idx:]
+
+
 def build_archive_item(link: str, title: str, cover: str, publish_iso: str, publish_title: str, publish_date: str) -> str:
     return (
         '<div class="article-sort-item">'
@@ -927,6 +953,7 @@ def main() -> int:
         anchor = '<div class="recent-posts" id="recent-posts">'
         if anchor in index_text and post_link not in index_text:
             index_text = index_text.replace(anchor, anchor + new_item, 1)
+        index_text = rebuild_recent_posts(index_text)
         index_path.write_text(index_text, encoding="utf-8")
 
     # Update archives index
