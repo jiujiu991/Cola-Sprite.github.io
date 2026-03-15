@@ -729,7 +729,82 @@ def build_recent_post_item(
     )
 
 
-def rebuild_recent_posts(html_text: str) -> str:
+def build_recent_post_item_no_cover(
+    link: str, title: str, publish_iso: str, publish_title: str, publish_date: str, excerpt: str
+) -> str:
+    return (
+        '<div class="recent-post-item">'
+        '<div class="recent-post-info no-cover">'
+        f'<a class="article-title" href="{link}" title="{title}">{title}</a>'
+        '<div class="article-meta-wrap"><span class="post-meta-date"><i class="far fa-calendar-alt"></i>'
+        '<span class="article-meta-label">发表于</span>'
+        f'<time datetime="{publish_iso}" title="{publish_title}">{publish_date}</time>'
+        "</span></div>"
+        f'<div class="content">{excerpt}</div>'
+        "</div></div>"
+    )
+
+
+def collect_posts(max_posts: int = 6) -> List[Dict[str, str]]:
+    posts = []
+    for p in REPO_ROOT.rglob("index.html"):
+        rel = p.relative_to(REPO_ROOT).as_posix()
+        m = re.match(r"(\d{4})/(\d{2})/(\d{2})/([^/]+)/index.html$", rel)
+        if not m:
+            continue
+        y, mo, d, _slug = m.groups()
+        try:
+            date_obj = dt.date(int(y), int(mo), int(d))
+        except ValueError:
+            continue
+        if not is_valid_template(p):
+            continue
+        text = p.read_text(encoding="utf-8", errors="ignore")
+        title = extract_first(r'<h1 class="post-title">([^<]+)</h1>', text)
+        if not title:
+            title = extract_first(r"<title>([^<]+)</title>", text)
+        title = title.replace(" | 可乐&雪碧 日常", "")
+        publish_iso = extract_first(
+            r'<time class="post-meta-date-created" datetime="([^"]+)"', text
+        )
+        if not publish_iso:
+            publish_iso = date_obj.strftime("%Y-%m-%dT00:00:00.000Z")
+        publish_date = extract_first(
+            r'<time class="post-meta-date-created"[^>]*>([^<]+)</time>', text
+        )
+        if not publish_date:
+            publish_date = date_obj.strftime("%Y-%m-%d")
+        publish_title = extract_first(
+            r'<time class="post-meta-date-created"[^>]*title="([^"]+)"', text
+        )
+        if not publish_title:
+            publish_title = f"发表于 {publish_date} 08:00:00"
+        cover = extract_first(r'meta property="og:image" content="([^"]+)"', text)
+        excerpt = extract_first(r'meta name="description" content="([^"]*)"', text)
+        if not excerpt:
+            excerpt = extract_first(r"<h1[^>]*>([^<]+)</h1>", text)
+        excerpt = safe_text(excerpt)
+        excerpt = re.sub(r"\s+", " ", excerpt).strip()
+        if len(excerpt) > 80:
+            excerpt = excerpt[:80].rstrip() + "…"
+        link = post_link_from_path(p)
+        posts.append(
+            {
+                "date": date_obj.isoformat(),
+                "link": link,
+                "title": title,
+                "cover": cover,
+                "publish_iso": publish_iso,
+                "publish_title": publish_title,
+                "publish_date": publish_date,
+                "excerpt": excerpt,
+            }
+        )
+    posts.sort(key=lambda x: x["date"], reverse=True)
+    return posts[:max_posts]
+
+
+def rebuild_recent_posts_from_posts(html_text: str, max_posts: int = 6) -> str:
     anchor = '<div class="recent-posts" id="recent-posts">'
     anchor_idx = html_text.find(anchor)
     if anchor_idx == -1:
@@ -738,21 +813,36 @@ def rebuild_recent_posts(html_text: str) -> str:
     if nav_idx == -1:
         return html_text
 
-    items = re.findall(r'<div class="recent-post-item">.*?</div></div>', html_text, flags=re.DOTALL)
-    if not items:
+    posts = collect_posts(max_posts=max_posts)
+    if not posts:
         return html_text
+    items = []
+    for post in posts:
+        if post["cover"]:
+            items.append(
+                build_recent_post_item(
+                    link=post["link"],
+                    title=post["title"],
+                    cover=post["cover"],
+                    publish_iso=post["publish_iso"],
+                    publish_title=post["publish_title"],
+                    publish_date=post["publish_date"],
+                    excerpt=post["excerpt"],
+                )
+            )
+        else:
+            items.append(
+                build_recent_post_item_no_cover(
+                    link=post["link"],
+                    title=post["title"],
+                    publish_iso=post["publish_iso"],
+                    publish_title=post["publish_title"],
+                    publish_date=post["publish_date"],
+                    excerpt=post["excerpt"],
+                )
+            )
 
-    seen_links = set()
-    cleaned = []
-    for item in items:
-        link = extract_first(r'href="([^"]+)"', item)
-        if link and link in seen_links:
-            continue
-        if link:
-            seen_links.add(link)
-        cleaned.append(item)
-
-    return html_text[: anchor_idx + len(anchor)] + "".join(cleaned) + html_text[nav_idx:]
+    return html_text[: anchor_idx + len(anchor)] + "".join(items) + html_text[nav_idx:]
 
 
 def build_archive_item(link: str, title: str, cover: str, publish_iso: str, publish_title: str, publish_date: str) -> str:
@@ -953,7 +1043,7 @@ def main() -> int:
         anchor = '<div class="recent-posts" id="recent-posts">'
         if anchor in index_text and post_link not in index_text:
             index_text = index_text.replace(anchor, anchor + new_item, 1)
-        index_text = rebuild_recent_posts(index_text)
+        index_text = rebuild_recent_posts_from_posts(index_text, max_posts=6)
         index_path.write_text(index_text, encoding="utf-8")
 
     # Update archives index
