@@ -103,19 +103,6 @@ def month_date_range(year: int, month: int) -> Tuple[dt.date, dt.date]:
     return start, end
 
 
-def extract_uuids(data) -> List[str]:
-    uuids = []
-    if isinstance(data, dict):
-        if isinstance(data.get("uuid"), str):
-            uuids.append(data["uuid"])
-        for value in data.values():
-            uuids.extend(extract_uuids(value))
-    elif isinstance(data, list):
-        for item in data:
-            uuids.extend(extract_uuids(item))
-    return uuids
-
-
 def clear_dir_images(dir_path: Path) -> None:
     if not dir_path.exists():
         return
@@ -180,13 +167,79 @@ def detect_photos_library(osxphotos: str) -> str:
     return ""
 
 
+def collect_labels(item: Dict) -> List[str]:
+    labels = []
+    for key in ("labels", "labels_normalized"):
+        value = item.get(key)
+        if isinstance(value, list):
+            labels.extend([str(v) for v in value if v])
+    return labels
+
+
+def is_people_photo(item: Dict) -> bool:
+    labels = collect_labels(item)
+    if any("人" in l for l in labels):
+        return True
+    persons = item.get("persons") or []
+    if any(p and p != "_UNKNOWN_" for p in persons):
+        return True
+    return False
+
+
+def is_landscape_photo(item: Dict) -> bool:
+    labels = collect_labels(item)
+    landscape_keywords = [
+        "风景", "户外", "天空", "日落", "日出", "海", "湖", "河", "山", "森林", "草地", "公园", "花", "云", "雪", "树", "道路",
+    ]
+    return any(any(k in l for k in landscape_keywords) for l in labels)
+
+
+def is_excluded_photo(item: Dict) -> bool:
+    labels = collect_labels(item)
+    exclude_keywords = ["文稿", "打印页", "电脑", "屏幕", "消费电子产品", "文字", "文档", "文件"]
+    return any(any(k in l for k in exclude_keywords) for l in labels)
+
+
+def pick_photos_by_tags(items: List[Dict], count: int) -> List[Dict]:
+    pool = [i for i in items if not is_excluded_photo(i)]
+    if not pool:
+        pool = items[:]
+
+    people = [i for i in pool if is_people_photo(i)]
+    landscape = [i for i in pool if is_landscape_photo(i)]
+
+    picked: List[Dict] = []
+
+    def pick_from(lst: List[Dict], n: int) -> None:
+        nonlocal picked
+        avail = [i for i in lst if i not in picked]
+        if not avail:
+            return
+        picked.extend(random.sample(avail, min(n, len(avail))))
+
+    min_each = max(1, count // 3)
+    pick_from(people, min_each)
+    pick_from(landscape, min_each)
+
+    remaining = [i for i in pool if i not in picked]
+    if len(picked) < count and remaining:
+        picked.extend(random.sample(remaining, min(count - len(picked), len(remaining))))
+
+    if len(picked) < count:
+        remaining2 = [i for i in items if i not in picked]
+        if remaining2:
+            picked.extend(random.sample(remaining2, min(count - len(picked), len(remaining2))))
+
+    return picked[:count]
+
+
 def export_random_photos_from_photos(
     year: int,
     month: int,
     dest_dir: Path,
     count: int,
     library_path: str = "",
-) -> bool:
+) -> Tuple[bool, Dict[str, str]]:
     osxphotos = shutil.which("osxphotos")
     if not osxphotos:
         try:
@@ -209,7 +262,7 @@ def export_random_photos_from_photos(
                 break
     if not osxphotos or not Path(osxphotos).exists():
         print("ERROR: osxphotos CLI not found. Install with `python3 -m pip install --user osxphotos`.")
-        return False
+        return False, {}
 
     if not library_path:
         library_path = detect_photos_library(osxphotos)
@@ -240,32 +293,49 @@ def export_random_photos_from_photos(
         )
     except Exception as exc:
         print(f"ERROR: osxphotos query failed: {exc}")
-        return False
+        return False, {}
     if not result.stdout:
         err = (result.stderr or "").strip()
         if err:
             print(f"ERROR: osxphotos query error: {err}")
         else:
             print("ERROR: osxphotos query returned no data.")
-        return False
+        return False, {}
     try:
         data = json.loads(result.stdout)
     except Exception as exc:
         print(f"ERROR: Failed to parse osxphotos JSON: {exc}")
-        return False
+        return False, {}
 
-    uuids = list(dict.fromkeys(extract_uuids(data)))
-    if not uuids:
+    items = data if isinstance(data, list) else []
+    if not items:
         print("ERROR: No photos found for the month in Photos.app.")
-        return False
+        return False, {}
 
     count = max(1, count)
-    pick = random.sample(uuids, min(count, len(uuids)))
+    picked_items = pick_photos_by_tags(items, count)
+    pick = [i.get("uuid") for i in picked_items if i.get("uuid")]
+    if not pick:
+        print("ERROR: No photos could be selected from Photos.app.")
+        return False, {}
 
     dest_dir.mkdir(parents=True, exist_ok=True)
     clear_dir_images(dest_dir)
 
-    export_cmd = [osxphotos, "export", "--only-photos"]
+    export_cmd = [
+        osxphotos,
+        "export",
+        "--only-photos",
+        "--skip-edited",
+        "--skip-live",
+        "--skip-bursts",
+        "--skip-raw",
+        "--filename",
+        "{uuid}",
+        "--jpeg-ext",
+        "jpg",
+        "--strip",
+    ]
     for uid in pick:
         export_cmd.extend(["--uuid", uid])
     if library_path:
@@ -281,7 +351,7 @@ def export_random_photos_from_photos(
         )
     except Exception as exc:
         print(f"ERROR: osxphotos export failed: {exc}")
-        return False
+        return False, {}
 
     # Remove osxphotos export db if created
     export_db = dest_dir / ".osxphotos_export.db"
@@ -292,7 +362,28 @@ def export_random_photos_from_photos(
             pass
 
     convert_images_to_jpeg(dest_dir)
-    return True
+    # Build description map based on labels for captions/prompt
+    uuid_to_desc: Dict[str, str] = {}
+    for item in picked_items:
+        uid = item.get("uuid")
+        if not uid:
+            continue
+        labels = collect_labels(item)
+        preferred = [l for l in labels if any(k in l for k in ["人", "风景", "户外", "天空", "海", "山", "云", "公园", "花"])]
+        chosen = preferred if preferred else labels
+        text = "、".join(chosen[:3]).strip()
+        if text:
+            uuid_to_desc[uid] = text
+
+    desc_map: Dict[str, str] = {}
+    for p in dest_dir.iterdir():
+        if not p.is_file() or p.suffix.lower() not in IMAGE_EXTS:
+            continue
+        desc = uuid_to_desc.get(p.stem)
+        if desc:
+            desc_map[p.name] = desc
+
+    return True, desc_map
 
 
 def image_size_sips(path: Path) -> Optional[Tuple[int, int]]:
@@ -436,10 +527,10 @@ def encode_image_base64(image_path: Path) -> str:
         return ""
 
 
-def analyze_images(image_paths: List[Path], openclaw_path: str) -> str:
-    """Use vision model to analyze images and return descriptions."""
+def analyze_images(image_paths: List[Path], openclaw_path: str) -> Dict[str, str]:
+    """Use vision model to analyze images and return {filename: description}."""
     if not image_paths or not Path(openclaw_path).exists():
-        return ""
+        return {}
 
     # Check if openclaw agent supports --image
     try:
@@ -451,14 +542,14 @@ def analyze_images(image_paths: List[Path], openclaw_path: str) -> str:
             timeout=5,
         )
         if "--image" not in (help_out.stdout or ""):
-            return ""
+            return {}
     except Exception:
-        return ""
+        return {}
     
-    # Only analyze first 4 images to keep prompt size reasonable
-    images_to_analyze = image_paths[:4]
+    # Only analyze first 8 images to keep prompt size reasonable
+    images_to_analyze = image_paths[:8]
     
-    descriptions = []
+    descriptions: Dict[str, str] = {}
     for img in images_to_analyze:
         b64 = encode_image_base64(img)
         if not b64:
@@ -477,13 +568,18 @@ def analyze_images(image_paths: List[Path], openclaw_path: str) -> str:
             )
             desc = (result.stdout or "").strip()
             if desc and len(desc) < 200:
-                descriptions.append(f"- {img.name}: {desc}")
+                descriptions[img.name] = desc
         except Exception:
             continue
-    
-    if descriptions:
-        return "\n图片内容分析：\n" + "\n".join(descriptions)
-    return ""
+
+    return descriptions
+
+
+def format_image_descriptions(desc_map: Dict[str, str]) -> str:
+    if not desc_map:
+        return ""
+    lines = [f"- {name}: {desc}" for name, desc in desc_map.items()]
+    return "\n图片内容分析：\n" + "\n".join(lines)
 
 
 def fallback_content(year: int, month_cn: str) -> Dict:
@@ -561,7 +657,7 @@ def safe_id(s: str) -> str:
     return s.strip()
 
 
-def build_image_captions(images: List[Path]) -> Dict[str, str]:
+def build_image_captions(images: List[Path], desc_map: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     keyword_map = {
         "coffee": "咖啡香气",
         "morning": "清晨的光",
@@ -584,6 +680,14 @@ def build_image_captions(images: List[Path]) -> Dict[str, str]:
         "mountain": "远山",
     }
     captions: Dict[str, str] = {}
+    if desc_map:
+        for name, desc in desc_map.items():
+            if not desc:
+                continue
+            text = re.split(r"[。.!！？]", desc)[0].strip()
+            if len(text) > 18:
+                text = text[:18].rstrip() + "…"
+            captions[name] = text
     for img in images:
         stem = img.stem.lower()
         tokens = re.split(r"[^a-z0-9]+", stem)
@@ -594,9 +698,9 @@ def build_image_captions(images: List[Path]) -> Dict[str, str]:
             if len(picked) >= 2:
                 break
         if not picked:
-            captions[img.name] = "这一刻"
+            captions.setdefault(img.name, "这一刻")
         else:
-            captions[img.name] = " · ".join(picked)
+            captions.setdefault(img.name, " · ".join(picked))
     return captions
 
 
@@ -621,8 +725,11 @@ def build_photo_wall(img_rel_paths: List[str], captions: Dict[str, str]) -> str:
 
 def build_article_html(content: Dict, img_rel_paths: List[str], captions: Dict[str, str]) -> str:
     # Ensure we have at least 4 images to place
-    imgs = (img_rel_paths + img_rel_paths[:6])[:6]
-    img_a, img_b, img_c, img_d, img_e, img_f = (imgs + imgs[:6])[:6]
+    imgs = img_rel_paths[:] if img_rel_paths else [f"{SITE_ROOT}img/404.jpg"]
+    while len(imgs) < 6:
+        imgs += imgs
+    imgs = imgs[:6]
+    img_a, img_b, img_c, img_d, img_e, img_f = imgs
 
     quote = content.get("quote", "")
     quote_text, quote_author = quote, ""
@@ -1136,9 +1243,10 @@ def main() -> int:
     month_cn = CN_MONTHS[month - 1]
 
     src_dir = SOURCE_BASE / f"{year}-{month_str}"
+    photo_desc_map: Dict[str, str] = {}
     if args.photos:
         print("Exporting random photos from Photos.app...")
-        ok = export_random_photos_from_photos(
+        ok, photo_desc_map = export_random_photos_from_photos(
             year=year,
             month=month,
             dest_dir=src_dir,
@@ -1163,20 +1271,28 @@ def main() -> int:
     desc_default = f"{month_cn}：日常与小确幸～"
 
     # Analyze images first to get descriptions
-    image_descriptions = ""
+    image_descriptions: Dict[str, str] = dict(photo_desc_map)
     if not args.no_openclaw:
         print("Analyzing images with vision model...")
-        image_descriptions = analyze_images(images, args.openclaw_path)
+        vision_desc = analyze_images(images, args.openclaw_path)
+        if vision_desc:
+            image_descriptions.update(vision_desc)
         if image_descriptions:
-            print(f"Got image descriptions for {len(images[:4])} images")
+            print(f"Got image descriptions for {len(image_descriptions)} images")
     
-    prompt = build_prompt(year, month_cn, title, [p.name for p in images], image_descriptions)
+    prompt = build_prompt(
+        year,
+        month_cn,
+        title,
+        [p.name for p in images],
+        format_image_descriptions(image_descriptions),
+    )
     content = None if args.no_openclaw else openclaw_generate(prompt, args.openclaw_path)
     if not content:
         content = fallback_content(year, month_cn)
 
     # Build article
-    captions = build_image_captions(images)
+    captions = build_image_captions(images, image_descriptions)
     img_rel_paths = [
         f"{SITE_ROOT}img/{year}-{month_str}/{p.name}"
         for p in images
@@ -1184,6 +1300,10 @@ def main() -> int:
     ]
     if not img_rel_paths:
         img_rel_paths = [f"{SITE_ROOT}img/{year}-{month_str}/{cover.name}"]
+    if len(img_rel_paths) < 6:
+        while len(img_rel_paths) < 6:
+            img_rel_paths += img_rel_paths
+        img_rel_paths = img_rel_paths[:6]
 
     article_html = build_article_html(content, img_rel_paths, captions)
 
