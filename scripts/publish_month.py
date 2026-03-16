@@ -61,6 +61,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Only export random Photos.app images into the monthly folder, then exit.",
     )
+    parser.add_argument(
+        "--only-if-tomorrow-first",
+        action="store_true",
+        help="When used with --prepare-photos, only run if tomorrow is the 1st.",
+    )
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing post if present.")
     parser.add_argument("--push", action="store_true", help="Auto git add/commit/push.")
     parser.add_argument("--commit-message", default="", help="Custom git commit message.")
@@ -72,6 +77,14 @@ def month_previous(today: dt.date) -> Tuple[int, int]:
     first = today.replace(day=1)
     prev_last = first - dt.timedelta(days=1)
     return prev_last.year, prev_last.month
+
+
+def month_current(today: dt.date) -> Tuple[int, int]:
+    return today.year, today.month
+
+
+def month_current(today: dt.date) -> Tuple[int, int]:
+    return today.year, today.month
 
 
 def parse_month(month_str: Optional[str]) -> Tuple[int, int]:
@@ -1250,6 +1263,14 @@ def main() -> int:
     src_dir = SOURCE_BASE / f"{year}-{month_str}"
     photo_desc_map: Dict[str, str] = {}
     if args.prepare_photos:
+        if args.only_if_tomorrow_first:
+            if (dt.date.today() + dt.timedelta(days=1)).day != 1:
+                print("Skip prepare: tomorrow is not the 1st.")
+                return 0
+            year, month = month_current(dt.date.today())
+            month_str = f"{month:02d}"
+            month_cn = CN_MONTHS[month - 1]
+            src_dir = SOURCE_BASE / f"{year}-{month_str}"
         args.photos = True
     if args.photos:
         print("Exporting random photos from Photos.app...")
