@@ -56,6 +56,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--photos", action="store_true", help="Pull random photos from Photos.app for the month.")
     parser.add_argument("--photos-count", type=int, default=7, help="How many photos to export from Photos.app.")
     parser.add_argument("--photos-library", default="", help="Optional Photos library path.")
+    parser.add_argument(
+        "--prepare-photos",
+        action="store_true",
+        help="Only export random Photos.app images into the monthly folder, then exit.",
+    )
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing post if present.")
     parser.add_argument("--push", action="store_true", help="Auto git add/commit/push.")
     parser.add_argument("--commit-message", default="", help="Custom git commit message.")
@@ -1244,6 +1249,8 @@ def main() -> int:
 
     src_dir = SOURCE_BASE / f"{year}-{month_str}"
     photo_desc_map: Dict[str, str] = {}
+    if args.prepare_photos:
+        args.photos = True
     if args.photos:
         print("Exporting random photos from Photos.app...")
         ok, photo_desc_map = export_random_photos_from_photos(
@@ -1255,6 +1262,9 @@ def main() -> int:
         )
         if not ok:
             return 1
+        if args.prepare_photos:
+            print(f"OK: prepared {args.photos_count} photos in {src_dir}")
+            return 0
     images = list_images(src_dir)
     if not images:
         print(f"ERROR: No images found in {src_dir}")
