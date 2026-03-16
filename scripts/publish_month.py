@@ -24,6 +24,7 @@ import datetime as dt
 import html
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -36,6 +37,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SITE_ROOT = "/Cola-Sprite.github.io/"
 SOURCE_BASE = Path("/Users/chengqian/Documents/colo/img")
 OPENCLAW = Path("/opt/homebrew/bin/openclaw")
+OSXPHOTOS = Path("/opt/homebrew/bin/osxphotos")
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
@@ -51,6 +53,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--date", help="Publish date YYYY-MM-DD (default: today).")
     parser.add_argument("--no-openclaw", action="store_true", help="Skip OpenClaw and use fallback text.")
     parser.add_argument("--openclaw-path", default=str(OPENCLAW), help="Path to openclaw binary.")
+    parser.add_argument("--photos", action="store_true", help="Pull random photos from Photos.app for the month.")
+    parser.add_argument("--photos-count", type=int, default=7, help="How many photos to export from Photos.app.")
+    parser.add_argument("--photos-library", default="", help="Optional Photos library path.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing post if present.")
     parser.add_argument("--push", action="store_true", help="Auto git add/commit/push.")
     parser.add_argument("--commit-message", default="", help="Custom git commit message.")
@@ -87,6 +92,207 @@ def list_images(src_dir: Path) -> List[Path]:
         if p.is_file() and p.suffix.lower() in IMAGE_EXTS:
             images.append(p)
     return sorted(images)
+
+
+def month_date_range(year: int, month: int) -> Tuple[dt.date, dt.date]:
+    start = dt.date(year, month, 1)
+    if month == 12:
+        end = dt.date(year + 1, 1, 1) - dt.timedelta(days=1)
+    else:
+        end = dt.date(year, month + 1, 1) - dt.timedelta(days=1)
+    return start, end
+
+
+def extract_uuids(data) -> List[str]:
+    uuids = []
+    if isinstance(data, dict):
+        if isinstance(data.get("uuid"), str):
+            uuids.append(data["uuid"])
+        for value in data.values():
+            uuids.extend(extract_uuids(value))
+    elif isinstance(data, list):
+        for item in data:
+            uuids.extend(extract_uuids(item))
+    return uuids
+
+
+def clear_dir_images(dir_path: Path) -> None:
+    if not dir_path.exists():
+        return
+    for p in dir_path.iterdir():
+        if p.is_file() and p.suffix.lower() in IMAGE_EXTS:
+            p.unlink()
+
+
+def convert_images_to_jpeg(dir_path: Path) -> None:
+    sips = shutil.which("sips")
+    if not sips:
+        return
+    for p in dir_path.iterdir():
+        if not p.is_file():
+            continue
+        if p.suffix.lower() in {".jpg", ".jpeg"}:
+            continue
+        if p.suffix.lower() not in IMAGE_EXTS:
+            continue
+        target = p.with_suffix(".jpg")
+        if target.exists():
+            target = p.with_name(f"{p.stem}-converted.jpg")
+        subprocess.run(
+            [sips, "-s", "format", "jpeg", str(p), "--out", str(target)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
+        try:
+            os.chmod(target, 0o644)
+        except Exception:
+            pass
+
+
+def detect_photos_library(osxphotos: str) -> str:
+    try:
+        result = subprocess.run(
+            [osxphotos, "list", "--json"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except Exception:
+        return ""
+    if not result.stdout:
+        return ""
+    try:
+        data = json.loads(result.stdout)
+    except Exception:
+        return ""
+    last_lib = data.get("last_library")
+    if isinstance(last_lib, str) and last_lib:
+        return last_lib
+    libs = data.get("photo_libraries")
+    if isinstance(libs, list) and libs:
+        return libs[0]
+    return ""
+
+
+def export_random_photos_from_photos(
+    year: int,
+    month: int,
+    dest_dir: Path,
+    count: int,
+    library_path: str = "",
+) -> bool:
+    osxphotos = shutil.which("osxphotos")
+    if not osxphotos:
+        try:
+            user_base = subprocess.run(
+                [sys.executable, "-m", "site", "--user-base"],
+                check=False,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        except Exception:
+            user_base = ""
+        candidates = []
+        if user_base:
+            candidates.append(str(Path(user_base) / "bin" / "osxphotos"))
+        candidates.append(str(Path.home() / ".local" / "bin" / "osxphotos"))
+        candidates.append(str(OSXPHOTOS))
+        for cand in candidates:
+            if cand and Path(cand).exists():
+                osxphotos = cand
+                break
+    if not osxphotos or not Path(osxphotos).exists():
+        print("ERROR: osxphotos CLI not found. Install with `python3 -m pip install --user osxphotos`.")
+        return False
+
+    if not library_path:
+        library_path = detect_photos_library(osxphotos)
+
+    start, end = month_date_range(year, month)
+    from_date = start.isoformat()
+    to_date = end.isoformat()
+
+    query_cmd = [
+        osxphotos,
+        "query",
+        "--from-date",
+        from_date,
+        "--to-date",
+        to_date,
+        "--only-photos",
+        "--json",
+    ]
+    if library_path:
+        query_cmd.extend(["--library", library_path])
+    try:
+        result = subprocess.run(
+            query_cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except Exception as exc:
+        print(f"ERROR: osxphotos query failed: {exc}")
+        return False
+    if not result.stdout:
+        err = (result.stderr or "").strip()
+        if err:
+            print(f"ERROR: osxphotos query error: {err}")
+        else:
+            print("ERROR: osxphotos query returned no data.")
+        return False
+    try:
+        data = json.loads(result.stdout)
+    except Exception as exc:
+        print(f"ERROR: Failed to parse osxphotos JSON: {exc}")
+        return False
+
+    uuids = list(dict.fromkeys(extract_uuids(data)))
+    if not uuids:
+        print("ERROR: No photos found for the month in Photos.app.")
+        return False
+
+    count = max(1, count)
+    pick = random.sample(uuids, min(count, len(uuids)))
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    clear_dir_images(dest_dir)
+
+    export_cmd = [osxphotos, "export", "--only-photos"]
+    for uid in pick:
+        export_cmd.extend(["--uuid", uid])
+    if library_path:
+        export_cmd.extend(["--library", library_path])
+    export_cmd.append(str(dest_dir))
+    try:
+        subprocess.run(
+            export_cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except Exception as exc:
+        print(f"ERROR: osxphotos export failed: {exc}")
+        return False
+
+    # Remove osxphotos export db if created
+    export_db = dest_dir / ".osxphotos_export.db"
+    if export_db.exists():
+        try:
+            export_db.unlink()
+        except Exception:
+            pass
+
+    convert_images_to_jpeg(dest_dir)
+    return True
 
 
 def image_size_sips(path: Path) -> Optional[Tuple[int, int]]:
@@ -930,6 +1136,17 @@ def main() -> int:
     month_cn = CN_MONTHS[month - 1]
 
     src_dir = SOURCE_BASE / f"{year}-{month_str}"
+    if args.photos:
+        print("Exporting random photos from Photos.app...")
+        ok = export_random_photos_from_photos(
+            year=year,
+            month=month,
+            dest_dir=src_dir,
+            count=args.photos_count,
+            library_path=args.photos_library,
+        )
+        if not ok:
+            return 1
     images = list_images(src_dir)
     if not images:
         print(f"ERROR: No images found in {src_dir}")
